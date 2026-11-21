@@ -1,0 +1,124 @@
+### Requiere el servidor en marcha: npm run dev
+@base = http://localhost:3000/api
+
+### Estado del servidor y de MongoDB
+GET {{base}}/health
+
+### ---------- CATEGORIAS ----------
+### Listar
+GET {{base}}/categorias
+
+### Crear (copiar el _id de la respuesta en @categoriaId)
+POST {{base}}/categorias
+Content-Type: application/json
+
+{ "nombre": "Mascotas", "descripcion": "Cuidado de animales" }
+
+###
+@categoriaId = PEGAR_ID_AQUI
+
+### ---------- SERVICIOS ----------
+### Crear
+POST {{base}}/servicios
+Content-Type: application/json
+
+{
+  "nombre": "Paseador de iguanas",
+  "descripcion": "Paseo y asoleo de reptiles domesticos",
+  "categoriaId": "{{categoriaId}}",
+  "etiquetas": ["iguana", "reptiles", "paseo"],
+  "esInusual": true
+}
+
+###
+@servicioId = PEGAR_ID_AQUI
+
+### Busqueda por texto libre
+GET {{base}}/servicios?q=funeral
+
+### Solo servicios inusuales
+GET {{base}}/servicios?inusual=true
+
+### Obtener uno
+GET {{base}}/servicios/{{servicioId}}
+
+### Actualizar
+PUT {{base}}/servicios/{{servicioId}}
+Content-Type: application/json
+
+{ "descripcion": "Paseo, asoleo y alimentacion de reptiles" }
+
+### Eliminar
+DELETE {{base}}/servicios/{{servicioId}}
+
+### ---------- PRESTADORES ----------
+### Crear
+POST {{base}}/prestadores
+Content-Type: application/json
+
+{
+  "nombre": "Carlos Mesa",
+  "email": "carlos.mesa@example.com",
+  "ciudad": "Bogota",
+  "zonas": ["Suba"],
+  "serviciosOfrecidos": [
+    { "servicioId": "{{servicioId}}", "tarifaBase": 35000, "unidad": "hora", "experienciaAnios": 3 }
+  ]
+}
+
+###
+@prestadorId = PEGAR_ID_AQUI
+
+### Buscar por servicio y zona
+GET {{base}}/prestadores?servicioId={{servicioId}}&zona=Suba
+
+### Agregar certificacion (subdocumento embebido)
+POST {{base}}/prestadores/{{prestadorId}}/certificaciones
+Content-Type: application/json
+
+{ "titulo": "Manejo de fauna exotica", "entidad": "SENA" }
+
+### Actualizar estado
+PUT {{base}}/prestadores/{{prestadorId}}
+Content-Type: application/json
+
+{ "estado": "verificado" }
+
+### Eliminar
+DELETE {{base}}/prestadores/{{prestadorId}}
+
+### ---------- USUARIOS ----------
+GET {{base}}/usuarios
+
+###
+@clienteId = PEGAR_ID_AQUI
+
+### ---------- ORDENES ----------
+### Crear orden (queda en estado "solicitada")
+POST {{base}}/ordenes
+Content-Type: application/json
+
+{
+  "clienteId": "{{clienteId}}",
+  "servicioId": "{{servicioId}}",
+  "descripcion": "Pasear a mi iguana el sabado",
+  "zona": "Suba"
+}
+
+###
+@ordenId = PEGAR_ID_AQUI
+
+### Cambiar estado (registra fecha y actor en historialEstados)
+PATCH {{base}}/ordenes/{{ordenId}}/estado
+Content-Type: application/json
+
+{ "estado": "cotizada", "actor": { "tipo": "prestador", "id": "{{prestadorId}}" }, "precioAcordado": 70000 }
+
+### Transicion invalida -> 409
+PATCH {{base}}/ordenes/{{ordenId}}/estado
+Content-Type: application/json
+
+{ "estado": "pagada", "actor": { "tipo": "sistema" } }
+
+### Ver orden con historial
+GET {{base}}/ordenes/{{ordenId}}
