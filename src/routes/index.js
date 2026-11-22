@@ -17,10 +17,12 @@ router.get('/health', (req, res) => {
   });
 });
 
+router.use('/auth', require('./auth.routes'));
 router.use('/categorias', require('./categorias.routes'));
 router.use('/servicios', require('./servicios.routes'));
 router.use('/prestadores', require('./prestadores.routes'));
 router.use('/usuarios', require('./usuarios.routes'));
 router.use('/ordenes', require('./ordenes.routes'));
+router.use('/reportes', require('./reportes.routes'));
 
 module.exports = router;

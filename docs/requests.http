@@ -1,8 +1,26 @@
 ### Requiere el servidor en marcha: npm run dev
 @base = http://localhost:3000/api
+@token = PEGAR_TOKEN_DEL_LOGIN_AQUI
 
 ### Estado del servidor y de MongoDB
 GET {{base}}/health
+
+### ---------- AUTENTICACION ----------
+### Registro de cliente (cambiar rol a "prestador" para crear un prestador)
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{ "rol": "usuario", "nombre": "Ana Gomez", "email": "ana@example.com", "password": "ana12345" }
+
+### Inicio de sesion: copiar el token de la respuesta en @token
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{ "email": "ana.gomez@example.com", "password": "ana12345" }
+
+### Perfil de la sesion (requiere token)
+GET {{base}}/auth/yo
+Authorization: Bearer {{token}}
 
 ### ---------- CATEGORIAS ----------
 ### Listar
@@ -11,6 +29,7 @@ GET {{base}}/categorias
 ### Crear (copiar el _id de la respuesta en @categoriaId)
 POST {{base}}/categorias
 Content-Type: application/json
+Authorization: Bearer {{token}}
 
 { "nombre": "Mascotas", "descripcion": "Cuidado de animales" }
 
@@ -21,6 +40,7 @@ Content-Type: application/json
 ### Crear
 POST {{base}}/servicios
 Content-Type: application/json
+Authorization: Bearer {{token}}
 
 {
   "nombre": "Paseador de iguanas",
@@ -45,11 +65,13 @@ GET {{base}}/servicios/{{servicioId}}
 ### Actualizar
 PUT {{base}}/servicios/{{servicioId}}
 Content-Type: application/json
+Authorization: Bearer {{token}}
 
 { "descripcion": "Paseo, asoleo y alimentacion de reptiles" }
 
 ### Eliminar
 DELETE {{base}}/servicios/{{servicioId}}
+Authorization: Bearer {{token}}
 
 ### ---------- PRESTADORES ----------
 ### Crear
@@ -75,17 +97,20 @@ GET {{base}}/prestadores?servicioId={{servicioId}}&zona=Suba
 ### Agregar certificacion (subdocumento embebido)
 POST {{base}}/prestadores/{{prestadorId}}/certificaciones
 Content-Type: application/json
+Authorization: Bearer {{token}}
 
 { "titulo": "Manejo de fauna exotica", "entidad": "SENA" }
 
 ### Actualizar estado
 PUT {{base}}/prestadores/{{prestadorId}}
 Content-Type: application/json
+Authorization: Bearer {{token}}
 
 { "estado": "verificado" }
 
 ### Eliminar
 DELETE {{base}}/prestadores/{{prestadorId}}
+Authorization: Bearer {{token}}
 
 ### ---------- USUARIOS ----------
 GET {{base}}/usuarios
@@ -94,9 +119,10 @@ GET {{base}}/usuarios
 @clienteId = PEGAR_ID_AQUI
 
 ### ---------- ORDENES ----------
-### Crear orden (queda en estado "solicitada")
+### Crear orden (queda en estado "solicitada"); el cliente se toma del token
 POST {{base}}/ordenes
 Content-Type: application/json
+Authorization: Bearer {{token}}
 
 {
   "clienteId": "{{clienteId}}",
@@ -108,17 +134,29 @@ Content-Type: application/json
 ###
 @ordenId = PEGAR_ID_AQUI
 
-### Cambiar estado (registra fecha y actor en historialEstados)
+### Cambiar estado (el actor se toma del token y queda en historialEstados)
 PATCH {{base}}/ordenes/{{ordenId}}/estado
 Content-Type: application/json
+Authorization: Bearer {{token}}
 
-{ "estado": "cotizada", "actor": { "tipo": "prestador", "id": "{{prestadorId}}" }, "precioAcordado": 70000 }
+{ "estado": "cotizada", "precioAcordado": 70000 }
 
 ### Transicion invalida -> 409
 PATCH {{base}}/ordenes/{{ordenId}}/estado
 Content-Type: application/json
+Authorization: Bearer {{token}}
 
-{ "estado": "pagada", "actor": { "tipo": "sistema" } }
+{ "estado": "pagada" }
 
 ### Ver orden con historial
 GET {{base}}/ordenes/{{ordenId}}
+Authorization: Bearer {{token}}
+
+### ---------- REPORTES ----------
+### RP-02: ranking de prestadores (requiere token de admin)
+GET {{base}}/reportes/ranking-prestadores?limite=10
+Authorization: Bearer {{token}}
+
+### Con filtros
+GET {{base}}/reportes/ranking-prestadores?zona=Chapinero&minCalificacion=4
+Authorization: Bearer {{token}}

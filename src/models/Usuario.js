@@ -23,6 +23,8 @@ const usuarioSchema = new Schema(
     telefono: { type: String, trim: true },
     ciudad: { type: String, trim: true },
     direcciones: { type: [direccionSchema], default: [] },
+    passwordHash: { type: String, select: false },
+    rol: { type: String, enum: ['usuario', 'admin'], default: 'usuario' },
     activo: { type: Boolean, default: true },
   },
   { timestamps: true, collection: 'usuarios' }

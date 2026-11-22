@@ -6,19 +6,94 @@ const dinero = (n) => '$' + Number(n || 0).toLocaleString('es-CO');
 const fecha = (d) => (d ? new Date(d).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' }) : '');
 const lista = (texto) => String(texto || '').split(',').map((t) => t.trim()).filter(Boolean);
 
+const sesion = {
+  token: localStorage.getItem('handleToken') || null,
+  usuario: (() => {
+    try { return JSON.parse(localStorage.getItem('handleSesion') || 'null'); }
+    catch { return null; }
+  })(),
+};
+
 async function api(ruta, metodo = 'GET', cuerpo) {
+  const headers = {};
+  if (cuerpo !== undefined) headers['Content-Type'] = 'application/json';
+  if (sesion.token) headers.Authorization = 'Bearer ' + sesion.token;
   const res = await fetch('/api' + ruta, {
     method: metodo,
-    headers: cuerpo ? { 'Content-Type': 'application/json' } : undefined,
-    body: cuerpo ? JSON.stringify(cuerpo) : undefined,
+    headers,
+    body: cuerpo !== undefined ? JSON.stringify(cuerpo) : undefined,
   });
   if (res.status === 204) return null;
   const datos = await res.json().catch(() => ({}));
   if (!res.ok) {
+    if (res.status === 401 && sesion.token && !ruta.startsWith('/auth/')) cerrarSesion(false);
     const detalle = datos.detalles ? ': ' + datos.detalles.join('; ') : '';
     throw new Error((datos.error || 'Error ' + res.status) + detalle);
   }
   return datos;
+}
+
+function aplicarSesion() {
+  document.body.dataset.sesion = sesion.usuario ? '1' : '0';
+  document.body.dataset.rol = sesion.usuario?.rol || '';
+  $('#sesion').textContent = sesion.usuario
+    ? `${sesion.usuario.nombre} · ${sesion.usuario.rol}`
+    : '';
+  $('#sesionBoton').textContent = sesion.usuario ? 'Salir' : 'Ingresar';
+  document.querySelectorAll('[data-rol-permitido]').forEach((el) => {
+    el.hidden = !sesion.usuario || !el.dataset.rolPermitido.split(' ').includes(sesion.usuario.rol);
+  });
+}
+
+function guardarSesion(datos) {
+  sesion.token = datos.token;
+  sesion.usuario = datos.usuario;
+  localStorage.setItem('handleToken', datos.token);
+  localStorage.setItem('handleSesion', JSON.stringify(datos.usuario));
+  aplicarSesion();
+}
+
+function cerrarSesion(avisar = true) {
+  sesion.token = null;
+  sesion.usuario = null;
+  localStorage.removeItem('handleToken');
+  localStorage.removeItem('handleSesion');
+  aplicarSesion();
+  pintar();
+  if (avisar) aviso('Sesión cerrada');
+}
+
+function abrirSesion(modo = 'login') {
+  const registro = modo === 'registro';
+  $('#modal').innerHTML = `
+    <button class="cerrar" data-cerrar type="button">×</button>
+    <h2>${registro ? 'Crear cuenta' : 'Iniciar sesión'}</h2>
+    <form id="formSesion" class="formulario" data-modo="${modo}">
+      ${registro ? `<div class="campo ancho"><label>Rol</label><select name="rol">
+        <option value="usuario">Cliente</option><option value="prestador">Prestador de servicio</option>
+      </select></div><div class="campo ancho"><label>Nombre</label><input name="nombre" required></div>` : ''}
+      <div class="campo ancho"><label>Email</label><input name="email" type="email" required></div>
+      <div class="campo ancho"><label>Contraseña</label><input name="password" type="password" required minlength="8"></div>
+      <div class="acciones"><button class="boton oscuro">${registro ? 'Registrarme' : 'Ingresar'}</button></div>
+    </form>
+    <p class="meta" style="margin-top:14px">${registro ? '¿Ya tienes cuenta?' : '¿No tienes cuenta?'}
+      <button class="enlace" data-accion="${registro ? 'modo-login' : 'modo-registro'}">${registro ? 'Inicia sesión' : 'Regístrate'}</button></p>
+    ${registro ? '' : '<p class="meta" style="margin-top:6px">Prueba: ana.gomez@example.com / ana12345</p>'}`;
+  $('#modal').showModal();
+}
+
+async function enviarSesion(form) {
+  const datos = Object.fromEntries(new FormData(form));
+  const ruta = form.dataset.modo === 'registro' ? '/auth/registro' : '/auth/login';
+  try {
+    const res = await api(ruta, 'POST', datos);
+    guardarSesion(res);
+    $('#modal').close();
+    aviso(`Bienvenido, ${res.usuario.nombre}`);
+    await cargarTodo();
+  } catch (error) {
+    aviso(error.message, true);
+  }
 }
 
 function aviso(texto, esError) {
@@ -93,7 +168,8 @@ function ofertasDe(servicioId) {
 
 async function cargarTodo() {
   const [categorias, servicios, prestadores, usuarios, ordenes] = await Promise.all([
-    api('/categorias'), api('/servicios'), api('/prestadores'), api('/usuarios'), api('/ordenes'),
+    api('/categorias'), api('/servicios'), api('/prestadores'), api('/usuarios'),
+    api('/ordenes').catch(() => []),
   ]);
   Object.assign(estado, { categorias, servicios, prestadores, usuarios, ordenes });
   await buscar(false);
@@ -113,7 +189,7 @@ async function buscar(repintar = true) {
 
 function pintarClientes() {
   const sel = $('#clienteActual');
-  const actual = sel.value || localStorage.getItem('clienteActual');
+  const actual = sesion.usuario?.tipo === 'usuario' ? sesion.usuario.id : sel.value || localStorage.getItem('clienteActual');
   sel.innerHTML = estado.usuarios.length
     ? estado.usuarios.map((u) => `<option value="${u._id}">${esc(u.nombre)}</option>`).join('')
     : '<option value="">(sin clientes)</option>';
@@ -319,6 +395,9 @@ function vistaExplorar() {
 function verServicio(id) {
   const s = estado.servicios.find((x) => x._id === id);
   const ofertas = ofertasDe(id);
+  const propio = sesion.usuario && (sesion.usuario.rol === 'admin' ||
+    (sesion.usuario.rol === 'prestador' && String(s.creadoPor || '') === sesion.usuario.id));
+  const puedeSolicitar = sesion.usuario && ['usuario', 'admin'].includes(sesion.usuario.rol);
   abrirModal(`
     <h2>${esc(s.nombre)}</h2>
     <p class="meta">${esc(s.categoriaId?.nombre || '')} · ${s.modalidades.map((m) => MODALIDADES.find(([v]) => v === m)?.[1]).join(', ')}</p>
@@ -332,15 +411,20 @@ function verServicio(id) {
           <td class="derecha"><b>${dinero(o.tarifaBase)}</b> <span class="meta">/ ${esc(o.unidad)}</span></td></tr>`).join('')}</table>`
       : '<p class="meta">Todavía ningún prestador ofrece este servicio.</p>'}
     <div class="acciones" style="display:flex;align-items:center;margin-top:24px">
-      <button class="enlace peligro" data-accion="eliminar-servicio" data-id="${id}" style="margin-right:auto">Eliminar</button>
-      <button class="boton" data-accion="editar-servicio" data-id="${id}">Editar</button>
-      <button class="boton oscuro" autofocus data-accion="solicitar" data-id="${id}">Solicitar</button>
+      ${propio ? `<button class="enlace peligro" data-accion="eliminar-servicio" data-id="${id}" style="margin-right:auto">Eliminar</button>
+      <button class="boton" data-accion="editar-servicio" data-id="${id}">Editar</button>` : '<span style="margin-right:auto"></span>'}
+      ${puedeSolicitar
+        ? `<button class="boton oscuro" autofocus data-accion="solicitar" data-id="${id}">Solicitar</button>`
+        : '<button class="boton oscuro" autofocus data-accion="abrir-sesion">Ingresar para solicitar</button>'}
     </div>`);
 }
 
 function solicitarServicio(id) {
-  const clienteId = $('#clienteActual').value;
-  if (!clienteId) return aviso('Primero crea un cliente en Gestión', true);
+  if (!sesion.usuario || !['usuario', 'admin'].includes(sesion.usuario.rol)) {
+    return aviso('Ingresa como cliente para solicitar servicios', true);
+  }
+  const clienteId = sesion.usuario.id;
+  if (!clienteId) return aviso('No se pudo identificar al cliente de la sesión', true);
   const s = estado.servicios.find((x) => x._id === id);
   const campos = [
     { nombre: 'descripcion', etiqueta: '¿Qué necesitas exactamente?', tipo: 'textarea', requerido: true, ancho: true },
@@ -363,7 +447,11 @@ function solicitarServicio(id) {
 const UNIDADES = [['servicio', 'Servicio completo'], ['hora', 'Hora'], ['dia', 'Día']];
 const campoPrestador = () => ({
   nombre: 'prestadorId', etiqueta: 'Prestador', tipo: 'select', requerido: true,
-  opciones: estado.prestadores.map((p) => [p._id, p.nombre]), valor: localStorage.getItem('prestadorActual'),
+  opciones: (sesion.usuario?.rol === 'admin'
+    ? estado.prestadores
+    : estado.prestadores.filter((p) => p._id === sesion.usuario?.id)
+  ).map((p) => [p._id, p.nombre]),
+  valor: sesion.usuario?.rol === 'prestador' ? sesion.usuario.id : localStorage.getItem('prestadorActual'),
 });
 const camposOferta = () => [
   { nombre: 'tarifaBase', etiqueta: 'Precio', tipo: 'number', requerido: true },
@@ -374,6 +462,10 @@ const camposOferta = () => [
 function vistaPublicar() {
   const cabecera = `<div class="encabezado"><div><h1>Publicar servicio</h1>
     <p>Tres pasos: quién lo ofrece, qué es y cuánto cuesta.</p></div></div>`;
+  if (!sesion.usuario || !['admin', 'prestador'].includes(sesion.usuario.rol)) {
+    return `<section class="pagina estrecha">${cabecera}<div class="vacio">Ingresa como prestador o administrador para publicar.<br>
+      <button class="boton oscuro" data-accion="abrir-sesion">Iniciar sesión</button></div></section>`;
+  }
   if (!estado.prestadores.length) {
     return `<section class="pagina estrecha">${cabecera}<div class="vacio">Para publicar, primero regístrate como prestador.<br>
       <button class="boton oscuro" data-accion="nuevo-prestador">Registrarme como prestador</button></div></section>`;
@@ -408,8 +500,12 @@ async function publicar(form) {
 }
 
 // ---------- Vista: Prestadores ----------
+const puedeEditarPrestador = (p) => Boolean(sesion.usuario && (
+  sesion.usuario.rol === 'admin' || (sesion.usuario.tipo === 'prestador' && sesion.usuario.id === p._id)
+));
+
 function vistaPrestadores() {
-  const filas = estado.prestadores.map((p) => `
+  const filas = estado.prestadores.map((p) => { const editable = puedeEditarPrestador(p); return `
     <article class="tarjeta"><div class="tarjeta-cuerpo">
       <div class="panel-cabecera" style="margin-bottom:0">
         <div><h3>${esc(p.nombre)}</h3><div class="meta">${esc([p.ciudad, ...p.zonas].filter(Boolean).join(' · '))}</div></div>
@@ -420,11 +516,11 @@ function vistaPrestadores() {
         <td class="derecha"><b>${dinero(o.tarifaBase)}</b> <span class="meta">/ ${esc(o.unidad)}</span></td></tr>`).join('')}</table>` : '<p class="meta">Aún no ofrece servicios.</p>'}
       ${p.certificaciones.length ? `<div class="etiquetas">${p.certificaciones.map((c) => `<span>${esc(c.titulo)}${c.verificada ? ' ✓' : ''}</span>`).join('')}</div>` : ''}
       <div class="tarjeta-pie"><div class="fila-botones">
-        <button class="enlace" data-accion="ofrecer" data-id="${p._id}">+ Servicio</button>
+        ${editable ? `<button class="enlace" data-accion="ofrecer" data-id="${p._id}">+ Servicio</button>
         <button class="enlace" data-accion="certificar" data-id="${p._id}">+ Certificación</button>
         <button class="enlace" data-accion="editar-prestador" data-id="${p._id}">Editar</button>
-      </div><button class="enlace peligro" data-accion="eliminar-prestador" data-id="${p._id}">Eliminar</button></div>
-    </div></article>`);
+      </div><button class="enlace peligro" data-accion="eliminar-prestador" data-id="${p._id}">Eliminar</button>` : ''}</div>
+    </div></article>`; });
   return `<section class="pagina">
     <div class="encabezado"><div><h1>Prestadores</h1><p>Personas que ofrecen servicios, con sus zonas, tarifas y certificaciones.</p></div>
       <button class="boton oscuro" data-accion="nuevo-prestador">Registrar prestador</button></div>
@@ -435,7 +531,7 @@ function vistaPrestadores() {
 function editarPrestador(id) {
   const p = id ? porId('prestadores', id) : {};
   const campos = camposPrestador(p);
-  if (id) campos.push({ nombre: 'estado', etiqueta: 'Estado', tipo: 'select', valor: p.estado, opciones: [['pendiente', 'Pendiente'], ['verificado', 'Verificado'], ['suspendido', 'Suspendido']] });
+  if (id && sesion.usuario?.rol === 'admin') campos.push({ nombre: 'estado', etiqueta: 'Estado', tipo: 'select', valor: p.estado, opciones: [['pendiente', 'Pendiente'], ['verificado', 'Verificado'], ['suspendido', 'Suspendido']] });
   abrirFormulario(id ? 'Editar prestador' : 'Registrar prestador', campos, 'Guardar', (d) =>
     ejecutar(() => api('/prestadores' + (id ? '/' + id : ''), id ? 'PUT' : 'POST', { ...d, zonas: lista(d.zonas) }), 'Prestador guardado'));
 }
@@ -464,12 +560,25 @@ function certificar(id) {
 }
 
 // ---------- Vista: Ordenes ----------
+function puedeCambiarEstadoUI(o, estado) {
+  const u = sesion.usuario;
+  if (!u) return false;
+  if (u.rol === 'admin') return true;
+  if (u.tipo === 'prestador') {
+    return (o.estado === 'solicitada' && estado === 'cotizada') ||
+      (String(o.prestadorId || '') === u.id && ['agendada', 'en_ejecucion', 'finalizada'].includes(estado));
+  }
+  return u.tipo === 'usuario' && String(o.clienteId) === u.id &&
+    ['agendada', 'asignada', 'pagada', 'calificada', 'cancelada', 'en_reclamo'].includes(estado);
+}
+
 function vistaOrdenes() {
-  const clienteId = $('#clienteActual').value;
+  const clienteId = sesion.usuario?.tipo === 'usuario' ? sesion.usuario.id : $('#clienteActual').value;
   const soloMias = localStorage.getItem('soloMias') === '1';
   const ordenes = estado.ordenes.filter((o) => !soloMias || o.clienteId === clienteId);
   const filas = ordenes.map((o) => {
     const datos = [o.zona, o.direccion, o.fechaProgramada && fecha(o.fechaProgramada), o.precioAcordado != null && dinero(o.precioAcordado)].filter(Boolean);
+    const permitidas = TRANSICIONES[o.estado].filter((e) => puedeCambiarEstadoUI(o, e));
     return `
     <div class="panel">
       <div class="panel-cabecera">
@@ -483,8 +592,8 @@ function vistaOrdenes() {
       ${datos.length ? `<p class="meta">${datos.map(esc).join(' · ')}</p>` : ''}
       <ul class="historial">${o.historialEstados.map((h) => `<li><b>${esc(textoEstado(h.estado))}</b> · ${fecha(h.fecha)} · ${esc(h.actor.tipo)}${h.nota ? ' · ' + esc(h.nota) : ''}</li>`).join('')}</ul>
       ${SIGUIENTE[o.estado] ? `<p class="pista"><b>Siguiente paso:</b> ${SIGUIENTE[o.estado]}</p>` : ''}
-      ${TRANSICIONES[o.estado].length ? `<div class="fila-botones" style="margin-top:14px">
-        ${TRANSICIONES[o.estado].map((e) => e === 'cancelada' || e === 'en_reclamo'
+      ${permitidas.length ? `<div class="fila-botones" style="margin-top:14px">
+        ${permitidas.map((e) => e === 'cancelada' || e === 'en_reclamo'
           ? `<button class="enlace peligro" data-accion="cambiar-estado" data-id="${o._id}" data-valor="${e}">${ACCION[e]}</button>`
           : `<button class="boton mini oscuro" data-accion="cambiar-estado" data-id="${o._id}" data-valor="${e}">${ACCION[e]}</button>`).join('')}
       </div>` : ''}
@@ -499,8 +608,7 @@ function vistaOrdenes() {
 
 function cambiarEstado(id, nuevo) {
   const o = porId('ordenes', id);
-  const porDefecto = { cotizada: 'prestador', asignada: 'cliente', agendada: 'cliente', en_ejecucion: 'prestador', finalizada: 'prestador', pagada: 'cliente', calificada: 'cliente', cancelada: 'cliente', en_reclamo: 'cliente' }[nuevo];
-  const campos = [{ nombre: 'actorTipo', etiqueta: 'Quién hace el cambio', tipo: 'select', valor: porDefecto, opciones: [['cliente', 'Cliente'], ['prestador', 'Prestador'], ['sistema', 'Sistema']] }];
+  const campos = [];
   if (nuevo === 'cotizada') campos.push({ nombre: 'precioAcordado', etiqueta: 'Precio cotizado', tipo: 'number', requerido: true });
   if (nuevo === 'asignada') {
     const candidatos = ofertasDe(o.servicioId).map((x) => x.prestador);
@@ -510,9 +618,8 @@ function cambiarEstado(id, nuevo) {
   if (nuevo === 'agendada') campos.push({ nombre: 'fechaProgramada', etiqueta: 'Fecha acordada', tipo: 'datetime-local', valor: o.fechaProgramada ? o.fechaProgramada.slice(0, 16) : '' });
   campos.push({ nombre: 'nota', etiqueta: 'Nota (opcional)', ancho: true });
 
-  abrirFormulario(ACCION[nuevo], campos, 'Confirmar', ({ actorTipo, nota, ...resto }) => {
-    const actorId = actorTipo === 'cliente' ? o.clienteId : actorTipo === 'prestador' ? resto.prestadorId || o.prestadorId : undefined;
-    const cuerpo = { estado: nuevo, actor: { tipo: actorTipo, id: actorId || undefined }, nota: nota || undefined, ...resto };
+  abrirFormulario(ACCION[nuevo], campos, 'Confirmar', ({ nota, ...resto }) => {
+    const cuerpo = { estado: nuevo, nota: nota || undefined, ...resto };
     if (!cuerpo.fechaProgramada) delete cuerpo.fechaProgramada;
     return ejecutar(() => api(`/ordenes/${id}/estado`, 'PATCH', cuerpo), 'Estado actualizado');
   });
@@ -520,6 +627,9 @@ function cambiarEstado(id, nuevo) {
 
 // ---------- Vista: Gestion ----------
 function vistaGestion() {
+  if (sesion.usuario?.rol !== 'admin') {
+    return '<section class="pagina"><div class="vacio">Esta sección es solo para administradores.</div></section>';
+  }
   const tabla = (titulo, tipo, columnas, filas) => `
     <div class="panel">
       <div class="panel-cabecera"><h2>${titulo}</h2>
@@ -562,6 +672,7 @@ const VISTAS = { explorar: vistaExplorar, publicar: vistaPublicar, prestadores: 
 function pintar() {
   const nombre = VISTAS[location.hash.slice(1)] ? location.hash.slice(1) : 'explorar';
   $('#vista').innerHTML = VISTAS[nombre]();
+  aplicarSesion();
   document.querySelectorAll('#nav a').forEach((a) => a.classList.toggle('activa', a.getAttribute('href') === '#' + nombre));
 
   if (nombre === 'publicar' && $('#panelPublicar form')) {
@@ -575,6 +686,11 @@ function pintar() {
 window.addEventListener('hashchange', () => { pintar(); window.scrollTo(0, 0); });
 
 document.addEventListener('submit', (ev) => {
+  if (ev.target.id === 'formSesion') {
+    ev.preventDefault();
+    enviarSesion(ev.target);
+    return;
+  }
   if (ev.target.id !== 'formBuscar') return;
   ev.preventDefault();
   filtros.q = ev.target.elements.q.value.trim();
@@ -608,10 +724,14 @@ document.addEventListener('click', (ev) => {
     'filtro-categoria': () => { filtros.categoriaId = filtros.categoriaId === valor ? '' : valor; buscar(); },
     'ver-servicio': () => verServicio(id),
     solicitar: () => solicitarServicio(id),
+    sesion: () => (sesion.usuario ? cerrarSesion() : abrirSesion()),
+    'abrir-sesion': () => abrirSesion(),
+    'modo-login': () => abrirSesion('login'),
+    'modo-registro': () => abrirSesion('registro'),
     'editar-servicio': () => abrirFormulario('Editar servicio', camposServicio(servicio()), 'Guardar', (d) =>
       ejecutar(() => api('/servicios/' + id, 'PUT', datosServicio(d)), 'Servicio actualizado')),
     'eliminar-servicio': () => eliminar('/servicios', id, servicio().nombre),
-    'nuevo-prestador': () => editarPrestador(),
+    'nuevo-prestador': () => (sesion.usuario ? editarPrestador() : abrirSesion('registro')),
     'editar-prestador': () => editarPrestador(id),
     'eliminar-prestador': () => eliminar('/prestadores', id, nombreDe('prestadores', id)),
     ofrecer: () => ofrecerServicio(id),
@@ -631,6 +751,7 @@ document.addEventListener('click', (ev) => {
 // ---------- Inicio ----------
 (async () => {
   try {
+    aplicarSesion();
     await api('/health');
     await cargarTodo();
   } catch (error) {
