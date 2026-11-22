@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Handle Service</title>
+    <link rel="icon" href="img/logo.svg" />
+    <link rel="stylesheet" href="css/styles.css" />
+  </head>
+  <body>
+    <header class="barra">
+      <div class="contenedor barra-interna">
+        <a class="marca" href="#explorar">
+          <img class="logo" src="img/logo.svg" alt="">
+          <span>Handle Service</span>
+        </a>
+        <nav id="nav">
+          <a href="#explorar">Explorar</a>
+          <a href="#ordenes">Órdenes</a>
+          <a href="#prestadores">Prestadores</a>
+          <a href="#gestion">Gestión</a>
+        </nav>
+        <div class="barra-derecha">
+          <label class="actor" title="No hay inicio de sesión todavía: elige con qué cliente actuar">
+            <span>Contratando como</span>
+            <select id="clienteActual"></select>
+          </label>
+          <a class="boton oscuro" href="#publicar">Publicar servicio</a>
+        </div>
+      </div>
+    </header>
+
+    <main id="vista" class="contenedor"></main>
+
+    <footer class="pie">
+      <div class="contenedor pie-interno">
+        <span>Handle Service · Hecho para lo poco común</span>
+      </div>
+    </footer>
+
+    <dialog id="modal"></dialog>
+    <div id="avisos"></div>
+
+    <script src="js/app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,17 @@
+{
+  "name": "handle-service-backend",
+  "version": "0.1.0",
+  "description": "Backend de Handle Service: contratacion de servicios comunes y poco comunes (MongoDB + Redis)",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "seed": "node src/seed/seed.js"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^18.0.10",
+    "express": "^5.3.0",
+    "mongoose": "^9.12.3"
+  }
+}
