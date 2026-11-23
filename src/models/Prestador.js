@@ -36,6 +36,8 @@ const prestadorSchema = new Schema(
     zonas: { type: [String], default: [] },
     serviciosOfrecidos: { type: [servicioOfrecidoSchema], default: [] },
     certificaciones: { type: [certificacionSchema], default: [] },
+    passwordHash: { type: String, select: false },
+    rol: { type: String, enum: ['prestador'], default: 'prestador' },
     calificacionPromedio: { type: Number, min: 0, max: 5, default: 0 },
     totalCalificaciones: { type: Number, min: 0, default: 0 },
     estado: {

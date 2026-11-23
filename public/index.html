@@ -18,14 +18,16 @@
           <a href="#explorar">Explorar</a>
           <a href="#ordenes">Órdenes</a>
           <a href="#prestadores">Prestadores</a>
-          <a href="#gestion">Gestión</a>
+          <a href="#gestion" data-rol-permitido="admin">Gestión</a>
         </nav>
         <div class="barra-derecha">
-          <label class="actor" title="No hay inicio de sesión todavía: elige con qué cliente actuar">
+          <label class="actor" title="Cliente activo">
             <span>Contratando como</span>
             <select id="clienteActual"></select>
           </label>
-          <a class="boton oscuro" href="#publicar">Publicar servicio</a>
+          <span id="sesion" class="sesion"></span>
+          <button id="sesionBoton" class="boton" type="button" data-accion="sesion">Ingresar</button>
+          <a class="boton oscuro" href="#publicar" data-rol-permitido="admin prestador">Publicar servicio</a>
         </div>
       </div>
     </header>

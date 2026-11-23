@@ -14,6 +14,7 @@ const servicioSchema = new Schema(
     },
     esInusual: { type: Boolean, default: false },
     activo: { type: Boolean, default: true },
+    creadoPor: { type: Schema.Types.ObjectId, ref: 'Prestador', default: null },
   },
   { timestamps: true, collection: 'servicios' }
 );

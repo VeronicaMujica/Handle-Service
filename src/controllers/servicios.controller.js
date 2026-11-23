@@ -8,8 +8,6 @@ async function validarCategoria(categoriaId) {
   if (!existe) throw new ErrorHttp(400, 'La categoria indicada no existe');
 }
 
-// La categoria la escribe quien publica: se reutiliza si ya existe (sin distinguir
-// mayusculas ni tildes) y se crea si no
 async function resolverCategoria(body) {
   if (typeof body.categoria === 'string' && body.categoria.trim()) {
     const nombre = body.categoria.trim();
@@ -21,9 +19,20 @@ async function resolverCategoria(body) {
   await validarCategoria(body.categoriaId);
 }
 
+async function verificarPropietario(req, id) {
+  if (req.auth.rol === 'admin') return;
+  const servicio = await Servicio.findById(id);
+  if (!servicio) throw new ErrorHttp(404, 'Servicio no encontrado');
+  if (String(servicio.creadoPor || '') !== req.auth.id) {
+    throw new ErrorHttp(403, 'Solo puedes editar los servicios que publicaste');
+  }
+}
+
 async function crear(req, res) {
-  await resolverCategoria(req.body);
-  const servicio = await Servicio.create(req.body);
+  const datos = { ...req.body };
+  datos.creadoPor = req.auth.rol === 'admin' ? req.body.creadoPor || null : req.auth.id;
+  await resolverCategoria(datos);
+  const servicio = await Servicio.create(datos);
   res.status(201).json(servicio);
 }
 
@@ -48,8 +57,11 @@ async function obtener(req, res) {
 }
 
 async function actualizar(req, res) {
-  await resolverCategoria(req.body);
-  const servicio = await Servicio.findByIdAndUpdate(req.params.id, req.body, {
+  await verificarPropietario(req, req.params.id);
+  const datos = { ...req.body };
+  delete datos.creadoPor;
+  await resolverCategoria(datos);
+  const servicio = await Servicio.findByIdAndUpdate(req.params.id, datos, {
     returnDocument: 'after',
     runValidators: true,
   });
@@ -58,6 +70,7 @@ async function actualizar(req, res) {
 }
 
 async function eliminar(req, res) {
+  await verificarPropietario(req, req.params.id);
   const servicio = await Servicio.findByIdAndDelete(req.params.id);
   if (!servicio) throw new ErrorHttp(404, 'Servicio no encontrado');
   res.status(204).end();
