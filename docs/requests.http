@@ -1,4 +1,5 @@
 ### Requiere el servidor en marcha: npm run dev
+### Los campos nuevos son canónicos; se aceptan los alias anteriores (categoriaId, esInusual, *Id, etc.)
 @base = http://localhost:3000/api
 @token = PEGAR_TOKEN_DEL_LOGIN_AQUI
 
@@ -6,11 +7,11 @@
 GET {{base}}/health
 
 ### ---------- AUTENTICACION ----------
-### Registro de cliente (cambiar rol a "prestador" para crear un prestador)
+### Registro de cliente (cambiar roles a ["prestador"] para crear un prestador)
 POST {{base}}/auth/registro
 Content-Type: application/json
 
-{ "rol": "usuario", "nombre": "Ana Gomez", "email": "ana@example.com", "password": "ana12345" }
+{ "roles": ["cliente"], "nombre": "Ana Gomez", "email": "ana@example.com", "password": "ana12345" }
 
 ### Inicio de sesion: copiar el token de la respuesta en @token
 POST {{base}}/auth/login
@@ -23,21 +24,21 @@ GET {{base}}/auth/yo
 Authorization: Bearer {{token}}
 
 ### ---------- CATEGORIAS ----------
-### Listar
-GET {{base}}/categorias
+### Listar (filtro por estado: activo|inactivo)
+GET {{base}}/categorias?estado=activo
 
-### Crear (copiar el _id de la respuesta en @categoriaId)
+### Crear
 POST {{base}}/categorias
 Content-Type: application/json
 Authorization: Bearer {{token}}
 
-{ "nombre": "Mascotas", "descripcion": "Cuidado de animales" }
+{ "nombre": "Mascotas", "descripcion": "Cuidado de animales", "estado": "activo" }
 
 ###
 @categoriaId = PEGAR_ID_AQUI
 
 ### ---------- SERVICIOS ----------
-### Crear
+### Crear (categoria es el NOMBRE; tambien se acepta categoriaId)
 POST {{base}}/servicios
 Content-Type: application/json
 Authorization: Bearer {{token}}
@@ -45,18 +46,19 @@ Authorization: Bearer {{token}}
 {
   "nombre": "Paseador de iguanas",
   "descripcion": "Paseo y asoleo de reptiles domesticos",
-  "categoriaId": "{{categoriaId}}",
+  "categoria": "Mascotas",
   "etiquetas": ["iguana", "reptiles", "paseo"],
-  "esInusual": true
+  "modalidades": ["domicilio"],
+  "inusual": true
 }
 
 ###
 @servicioId = PEGAR_ID_AQUI
 
-### Busqueda por texto libre
+### Busqueda por texto libre (RF-03)
 GET {{base}}/servicios?q=funeral
 
-### Solo servicios inusuales
+### Solo servicios inusuales (RF-04 tambien permite ?modalidad=remoto)
 GET {{base}}/servicios?inusual=true
 
 ### Obtener uno
@@ -67,14 +69,14 @@ PUT {{base}}/servicios/{{servicioId}}
 Content-Type: application/json
 Authorization: Bearer {{token}}
 
-{ "descripcion": "Paseo, asoleo y alimentacion de reptiles" }
+{ "descripcion": "Paseo, asoleo y alimentacion de reptiles", "estado": "activo" }
 
 ### Eliminar
 DELETE {{base}}/servicios/{{servicioId}}
 Authorization: Bearer {{token}}
 
-### ---------- PRESTADORES ----------
-### Crear
+### ---------- PRESTADORES (vista de usuarios con perfilPrestador) ----------
+### Crear prestador con cuenta nueva (sin token)
 POST {{base}}/prestadores
 Content-Type: application/json
 
@@ -82,9 +84,29 @@ Content-Type: application/json
   "nombre": "Carlos Mesa",
   "email": "carlos.mesa@example.com",
   "ciudad": "Bogota",
-  "zonas": ["Suba"],
-  "serviciosOfrecidos": [
-    { "servicioId": "{{servicioId}}", "tarifaBase": 35000, "unidad": "hora", "experienciaAnios": 3 }
+  "zonasCobertura": ["Suba"],
+  "modalidades": ["domicilio"],
+  "servicios": [
+    { "_id": "{{servicioId}}", "tarifa": 35000, "unidad": "hora", "experienciaAnios": 3 }
+  ]
+}
+
+### Aplicar como prestador desde una cuenta de cliente recien creada
+### El perfil se agrega al MISMO usuario; la respuesta trae token/usuario nuevos.
+### No enviar un email distinto al de la sesion (un admin si puede crear otra cuenta).
+POST {{base}}/prestadores
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "email": "ana.gomez@example.com",
+  "telefono": "3001234567",
+  "ciudad": "Bogota",
+  "zonasCobertura": ["Chapinero"],
+  "modalidades": ["domicilio", "remoto"],
+  "descripcion": "Ayudo con tareas del hogar",
+  "servicios": [
+    { "_id": "{{servicioId}}", "tarifa": 35000, "unidad": "hora", "experienciaAnios": 3 }
   ]
 }
 
@@ -92,16 +114,16 @@ Content-Type: application/json
 @prestadorId = PEGAR_ID_AQUI
 
 ### Buscar por servicio y zona
-GET {{base}}/prestadores?servicioId={{servicioId}}&zona=Suba
+GET {{base}}/prestadores?servicio={{servicioId}}&zona=Suba
 
-### Agregar certificacion (subdocumento embebido)
+### Agregar certificacion (RF-32: vigente se recalcula con fechaVencimiento)
 POST {{base}}/prestadores/{{prestadorId}}/certificaciones
 Content-Type: application/json
 Authorization: Bearer {{token}}
 
-{ "titulo": "Manejo de fauna exotica", "entidad": "SENA" }
+{ "nombre": "Manejo de fauna exotica", "institucion": "SENA", "fechaVencimiento": "2030-12-31" }
 
-### Actualizar estado
+### Actualizar estado del perfil
 PUT {{base}}/prestadores/{{prestadorId}}
 Content-Type: application/json
 Authorization: Bearer {{token}}
@@ -113,33 +135,56 @@ DELETE {{base}}/prestadores/{{prestadorId}}
 Authorization: Bearer {{token}}
 
 ### ---------- USUARIOS ----------
-GET {{base}}/usuarios
+GET {{base}}/usuarios?roles=cliente
 
 ###
 @clienteId = PEGAR_ID_AQUI
 
 ### ---------- ORDENES ----------
-### Crear orden (queda en estado "solicitada"); el cliente se toma del token
+### Crear orden (queda en estado "solicitada"; el cliente se toma del token)
+### El snapshot se genera con nombreCliente, nombreServicio, categoria, descripcionSolicitud y fechaSolicitud
 POST {{base}}/ordenes
 Content-Type: application/json
 Authorization: Bearer {{token}}
 
 {
-  "clienteId": "{{clienteId}}",
-  "servicioId": "{{servicioId}}",
-  "descripcion": "Pasear a mi iguana el sabado",
+  "cliente": "{{clienteId}}",
+  "servicio": "{{servicioId}}",
+  "descripcionSolicitud": "Pasear a mi iguana el sabado",
+  "modalidad": "domicilio",
   "zona": "Suba"
 }
 
 ###
 @ordenId = PEGAR_ID_AQUI
 
-### Cambiar estado (el actor se toma del token y queda en historialEstados)
+### El prestador envia cotizacion
 PATCH {{base}}/ordenes/{{ordenId}}/estado
 Content-Type: application/json
 Authorization: Bearer {{token}}
 
 { "estado": "cotizada", "precioAcordado": 70000 }
+
+### El cliente acepta: estado "aceptada" (alias "asignada") y se congela tarifa/nombre en snapshot
+PATCH {{base}}/ordenes/{{ordenId}}/estado
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{ "estado": "aceptada", "prestador": "{{prestadorId}}" }
+
+### Cancelacion (quien y fecha se toman del token; penalizacion segun anticipacion si no se indica)
+PATCH {{base}}/ordenes/{{ordenId}}/estado
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{ "estado": "cancelada", "razon": "Ya no necesito el servicio" }
+
+### Calificacion (actualiza perfilPrestador.calificacion)
+PATCH {{base}}/ordenes/{{ordenId}}/estado
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{ "estado": "calificada", "puntaje": 5, "comentario": "Excelente servicio" }
 
 ### Transicion invalida -> 409
 PATCH {{base}}/ordenes/{{ordenId}}/estado
@@ -148,7 +193,7 @@ Authorization: Bearer {{token}}
 
 { "estado": "pagada" }
 
-### Ver orden con historial
+### Ver orden con snapshot, historial, cancelacion y calificacion
 GET {{base}}/ordenes/{{ordenId}}
 Authorization: Bearer {{token}}
 

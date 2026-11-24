@@ -1,67 +1,107 @@
 const Orden = require('../models/Orden');
 const Usuario = require('../models/Usuario');
 const Servicio = require('../models/Servicio');
-const Prestador = require('../models/Prestador');
 const { ErrorHttp } = require('../middlewares/errores');
+const { tieneRol } = require('../middlewares/autenticacion');
 
-const { TRANSICIONES } = Orden;
+const { TRANSICIONES, ESTADOS_ASIGNACION } = Orden;
+
+const idDe = (valor) => String(valor?._id || valor || '');
 
 function esAdmin(req) {
-  return req.auth.rol === 'admin';
+  return tieneRol(req, 'admin');
+}
+
+function puedeCrearOrden(req) {
+  return esAdmin(req) || tieneRol(req, 'cliente');
 }
 
 async function esVisible(req, orden) {
   if (esAdmin(req)) return true;
-  if (req.auth.tipo === 'usuario') return String(orden.clienteId) === req.auth.id;
+  if (tieneRol(req, 'cliente') && !tieneRol(req, 'prestador')) {
+    return idDe(orden.cliente || orden.clienteId) === req.auth.id;
+  }
   if (orden.estado === 'solicitada') return true;
   const cotizo = orden.historialEstados.some(
-    (h) => h.actor?.tipo === 'prestador' && String(h.actor.id || '') === req.auth.id
+    (h) => h.actor?.tipo === 'prestador' && idDe(h.actor.id) === req.auth.id
   );
-  return String(orden.prestadorId || '') === req.auth.id || cotizo;
+  return idDe(orden.prestador || orden.prestadorId) === req.auth.id || cotizo;
 }
 
 function puedeCambiar(req, orden, estado) {
   if (esAdmin(req)) return true;
   const actual = orden.estado;
-  if (req.auth.tipo === 'prestador') {
+  if (tieneRol(req, 'prestador')) {
     if (actual === 'solicitada' && estado === 'cotizada') return true;
     return (
-      String(orden.prestadorId || '') === req.auth.id &&
+      idDe(orden.prestador || orden.prestadorId) === req.auth.id &&
       ['agendada', 'en_ejecucion', 'finalizada'].includes(estado)
     );
   }
-  if (req.auth.tipo === 'usuario' && String(orden.clienteId) === req.auth.id) {
-    return ['agendada', 'asignada', 'pagada', 'calificada', 'cancelada', 'en_reclamo'].includes(estado);
+  if (tieneRol(req, 'cliente') && idDe(orden.cliente || orden.clienteId) === req.auth.id) {
+    return [
+      'agendada',
+      'asignada',
+      'aceptada',
+      'pagada',
+      'calificada',
+      'cancelada',
+      'en_reclamo',
+    ].includes(estado);
   }
   return false;
 }
 
+function calcularPenalizacion(orden) {
+  const tarifa = orden.snapshot?.tarifa ?? orden.precioAcordado ?? 0;
+  if (!orden.fechaProgramada || !tarifa) return 0;
+  const horas = (new Date(orden.fechaProgramada).getTime() - Date.now()) / 3600000;
+  if (horas >= 24) return 0;
+  if (horas >= 2) return Math.round(tarifa * 0.2);
+  return Math.round(tarifa * 0.5);
+}
+
 async function crear(req, res) {
-  const { clienteId, servicioId, descripcion, modalidad, zona, direccion, fechaProgramada } =
-    req.body;
+  const {
+    cliente,
+    clienteId,
+    servicio,
+    servicioId,
+    descripcion,
+    descripcionSolicitud,
+    modalidad,
+    zona,
+    direccion,
+    fechaProgramada,
+  } = req.body;
 
   let idCliente;
-  if (esAdmin(req)) idCliente = clienteId;
-  else if (req.auth.tipo === 'usuario') idCliente = req.auth.id;
+  if (esAdmin(req)) idCliente = cliente || clienteId;
+  else if (puedeCrearOrden(req)) idCliente = req.auth.id;
   else throw new ErrorHttp(403, 'Los prestadores no pueden crear ordenes');
 
+  const idServicio = servicio || servicioId;
   if (!idCliente) throw new ErrorHttp(400, 'Debe indicar el cliente de la orden');
+  if (!idServicio) throw new ErrorHttp(400, 'Debe indicar el servicio de la orden');
   if (!(await Usuario.exists({ _id: idCliente }))) {
     throw new ErrorHttp(400, 'El cliente indicado no existe');
   }
-  if (servicioId && !(await Servicio.exists({ _id: servicioId }))) {
+  if (!(await Servicio.exists({ _id: idServicio }))) {
     throw new ErrorHttp(400, 'El servicio indicado no existe');
   }
 
   const orden = await Orden.create({
+    cliente: idCliente,
     clienteId: idCliente,
-    servicioId,
-    descripcion,
+    servicio: idServicio,
+    servicioId: idServicio,
+    descripcion: descripcion || descripcionSolicitud,
     modalidad,
     zona,
     direccion,
     fechaProgramada,
     estado: 'solicitada',
+    snapshot: { descripcionSolicitud: descripcion || descripcionSolicitud, modalidad, zona },
     historialEstados: [
       { estado: 'solicitada', actor: { tipo: 'cliente', id: idCliente }, nota: 'Orden creada' },
     ],
@@ -72,15 +112,16 @@ async function crear(req, res) {
 async function listar(req, res) {
   const filtro = {};
   if (esAdmin(req)) {
-    const { clienteId, prestadorId, estado } = req.query;
-    if (clienteId) filtro.clienteId = clienteId;
-    if (prestadorId) filtro.prestadorId = prestadorId;
+    const { cliente, clienteId, prestador, prestadorId, estado } = req.query;
+    if (cliente || clienteId) filtro.cliente = cliente || clienteId;
+    if (prestador || prestadorId) filtro.prestador = prestador || prestadorId;
     if (estado) filtro.estado = estado;
-  } else if (req.auth.tipo === 'usuario') {
-    filtro.clienteId = req.auth.id;
+  } else if (tieneRol(req, 'cliente') && !tieneRol(req, 'prestador')) {
+    filtro.cliente = req.auth.id;
     if (req.query.estado) filtro.estado = req.query.estado;
   } else {
     filtro.$or = [
+      { prestador: req.auth.id },
       { prestadorId: req.auth.id },
       { estado: 'solicitada' },
       {
@@ -97,8 +138,11 @@ async function listar(req, res) {
 
 async function obtener(req, res) {
   const orden = await Orden.findById(req.params.id)
+    .populate('cliente', 'nombre email')
     .populate('clienteId', 'nombre email')
-    .populate('prestadorId', 'nombre calificacionPromedio')
+    .populate('prestador', 'nombre')
+    .populate('prestadorId', 'nombre')
+    .populate('servicio', 'nombre')
     .populate('servicioId', 'nombre');
   if (!orden) throw new ErrorHttp(404, 'Orden no encontrada');
   if (!(await esVisible(req, orden))) {
@@ -107,8 +151,35 @@ async function obtener(req, res) {
   res.json(orden);
 }
 
+async function registrarCalificacion(orden, puntaje, comentario) {
+  if (puntaje === undefined) return;
+  orden.calificacion = { puntaje, comentario, fecha: new Date() };
+
+  const idPrestador = idDe(orden.prestador || orden.prestadorId);
+  if (!idPrestador) return;
+  const prestador = await Usuario.findById(idPrestador);
+  if (!prestador?.perfilPrestador) return;
+
+  const calificacion = prestador.perfilPrestador.calificacion || { promedio: 0, total: 0 };
+  const total = (calificacion.total || 0) + 1;
+  const promedio = ((calificacion.promedio || 0) * (total - 1) + Number(puntaje)) / total;
+  prestador.perfilPrestador.calificacion = { promedio, total };
+  await prestador.save();
+}
+
 async function cambiarEstado(req, res) {
-  const { estado, nota, prestadorId, precioAcordado, fechaProgramada } = req.body;
+  const {
+    estado,
+    nota,
+    prestador,
+    prestadorId,
+    precioAcordado,
+    fechaProgramada,
+    razon,
+    penalizacion,
+    puntaje,
+    comentario,
+  } = req.body;
   if (!estado) throw new ErrorHttp(400, 'Debe indicar el nuevo estado');
 
   const orden = await Orden.findById(req.params.id);
@@ -127,20 +198,40 @@ async function cambiarEstado(req, res) {
     );
   }
 
-  if (estado === 'asignada') {
-    if (!prestadorId) throw new ErrorHttp(400, 'Para asignar la orden se requiere prestadorId');
-    if (!(await Prestador.exists({ _id: prestadorId }))) {
+  if (ESTADOS_ASIGNACION.includes(estado)) {
+    const idPrestador = prestador || prestadorId;
+    if (!idPrestador) throw new ErrorHttp(400, 'Para asignar la orden se requiere prestador');
+    const candidato = await Usuario.findById(idPrestador);
+    if (!candidato?.perfilPrestador) {
       throw new ErrorHttp(400, 'El prestador indicado no existe');
     }
-    orden.prestadorId = prestadorId;
+    orden.prestador = candidato._id;
+    orden.prestadorId = candidato._id;
+    orden.snapshot.nombrePrestador = candidato.nombre;
+    const oferta = candidato.perfilPrestador.servicios.find(
+      (s) => String(s._id) === String(orden.servicio || orden.servicioId)
+    );
+    orden.snapshot.tarifa =
+      oferta?.tarifa ?? oferta?.tarifaBase ?? precioAcordado ?? orden.precioAcordado;
   }
-  if (precioAcordado !== undefined) orden.precioAcordado = precioAcordado;
+  if (precioAcordado !== undefined) {
+    orden.precioAcordado = precioAcordado;
+    if (orden.snapshot.tarifa === undefined) orden.snapshot.tarifa = precioAcordado;
+  }
   if (fechaProgramada !== undefined) orden.fechaProgramada = fechaProgramada;
 
+  if (estado === 'cancelada') {
+    orden.cancelacion = {
+      quien: esAdmin(req) ? 'sistema' : req.auth.tipo === 'prestador' ? 'prestador' : 'cliente',
+      fecha: new Date(),
+      razon,
+      penalizacion: penalizacion ?? calcularPenalizacion(orden),
+    };
+  }
+  if (estado === 'calificada') await registrarCalificacion(orden, puntaje, comentario);
+
   const tipoActor = req.auth.tipo === 'usuario' ? 'cliente' : req.auth.tipo;
-  const actor = esAdmin(req)
-    ? { tipo: 'sistema' }
-    : { tipo: tipoActor, id: req.auth.id };
+  const actor = esAdmin(req) ? { tipo: 'sistema' } : { tipo: tipoActor, id: req.auth.id };
   orden.estado = estado;
   orden.historialEstados.push({ estado, actor, nota });
   await orden.save();

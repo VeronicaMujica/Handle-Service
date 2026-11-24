@@ -33,15 +33,28 @@ async function api(ruta, metodo = 'GET', cuerpo) {
   return datos;
 }
 
+const ALIAS_ROLES = { usuario: 'cliente', admin: 'administrador' };
+function rolesSesion() {
+  const u = sesion.usuario;
+  if (!u) return [];
+  const base = Array.isArray(u.roles) && u.roles.length ? u.roles : [u.rol];
+  return [...new Set(base.map((r) => ALIAS_ROLES[r] || r).filter(Boolean))];
+}
+const esAdmin = () => rolesSesion().includes('administrador');
+const esPrestador = () => rolesSesion().includes('prestador');
+const esCliente = () => rolesSesion().includes('cliente');
+const rolVisible = () => esAdmin() ? 'admin' : esPrestador() ? 'prestador' : 'usuario';
+
 function aplicarSesion() {
   document.body.dataset.sesion = sesion.usuario ? '1' : '0';
-  document.body.dataset.rol = sesion.usuario?.rol || '';
+  document.body.dataset.rol = rolVisible();
   $('#sesion').textContent = sesion.usuario
-    ? `${sesion.usuario.nombre} · ${sesion.usuario.rol}`
+    ? `${sesion.usuario.nombre} · ${rolVisible()}`
     : '';
   $('#sesionBoton').textContent = sesion.usuario ? 'Salir' : 'Ingresar';
   document.querySelectorAll('[data-rol-permitido]').forEach((el) => {
-    el.hidden = !sesion.usuario || !el.dataset.rolPermitido.split(' ').includes(sesion.usuario.rol);
+    const permitidos = el.dataset.rolPermitido.split(' ').map((r) => ALIAS_ROLES[r] || r);
+    el.hidden = !sesion.usuario || !permitidos.some((r) => rolesSesion().includes(r));
   });
 }
 
@@ -122,9 +135,10 @@ const filtros = { q: '', inusual: false, modalidad: '', categoriaId: '' };
 let resultados = []; // servicios que devuelve la busqueda
 
 const TRANSICIONES = {
-  solicitada: ['cotizada', 'cancelada'],
-  cotizada: ['asignada', 'cancelada'],
+  solicitada: ['cotizada', 'asignada', 'aceptada', 'cancelada'],
+  cotizada: ['asignada', 'aceptada', 'cancelada'],
   asignada: ['agendada', 'cancelada'],
+  aceptada: ['agendada', 'cancelada'],
   agendada: ['en_ejecucion', 'cancelada'],
   en_ejecucion: ['finalizada', 'en_reclamo'],
   finalizada: ['pagada', 'en_reclamo'],
@@ -134,13 +148,13 @@ const TRANSICIONES = {
   en_reclamo: ['finalizada', 'cancelada'],
 };
 const COLOR_ESTADO = {
-  solicitada: 'ambar', cotizada: 'ambar', asignada: 'azul', agendada: 'azul', en_ejecucion: 'azul',
+  solicitada: 'ambar', cotizada: 'ambar', asignada: 'azul', aceptada: 'azul', agendada: 'azul', en_ejecucion: 'azul',
   finalizada: 'verde', pagada: 'verde', calificada: 'verde', cancelada: 'rojo', en_reclamo: 'rojo',
   verificado: 'verde', pendiente: 'ambar', suspendido: 'rojo',
 };
 const textoEstado = (e) => String(e).replace('_', ' ');
 const ACCION = {
-  cotizada: 'Enviar cotización', asignada: 'Aceptar y asignar prestador', agendada: 'Agendar fecha',
+  cotizada: 'Enviar cotización', asignada: 'Aceptar y asignar prestador', aceptada: 'Aceptar y asignar prestador', agendada: 'Agendar fecha',
   en_ejecucion: 'Iniciar servicio', finalizada: 'Marcar como finalizado', pagada: 'Registrar pago',
   calificada: 'Marcar como calificada', cancelada: 'Cancelar', en_reclamo: 'Abrir reclamo',
 };
@@ -148,6 +162,7 @@ const SIGUIENTE = {
   solicitada: 'un prestador envía su cotización.',
   cotizada: 'el cliente acepta la cotización y se asigna el prestador.',
   asignada: 'cliente y prestador acuerdan la fecha.',
+  aceptada: 'cliente y prestador acuerdan la fecha.',
   agendada: 'el prestador inicia el servicio el día acordado.',
   en_ejecucion: 'el prestador marca el servicio como finalizado.',
   finalizada: 'el cliente paga el servicio.',
@@ -189,7 +204,7 @@ async function buscar(repintar = true) {
 
 function pintarClientes() {
   const sel = $('#clienteActual');
-  const actual = sesion.usuario?.tipo === 'usuario' ? sesion.usuario.id : sel.value || localStorage.getItem('clienteActual');
+  const actual = esCliente() ? sesion.usuario.id : sel.value || localStorage.getItem('clienteActual');
   sel.innerHTML = estado.usuarios.length
     ? estado.usuarios.map((u) => `<option value="${u._id}">${esc(u.nombre)}</option>`).join('')
     : '<option value="">(sin clientes)</option>';
@@ -310,21 +325,24 @@ const camposServicio = (s = {}) => [
   { nombre: 'nombre', etiqueta: 'Título del servicio', requerido: true, ancho: true, valor: s.nombre, ayuda: 'Ej: Paseo iguanas los fines de semana' },
   { nombre: 'descripcion', etiqueta: 'Descripción', tipo: 'textarea', requerido: true, ancho: true, valor: s.descripcion },
   { nombre: 'imagen', etiqueta: 'Foto (opcional)', tipo: 'imagen', ancho: true, valor: s.imagen },
-  { nombre: 'categoria', etiqueta: 'Categoría (elige una o escribe una nueva)', requerido: true, sugerencias: estado.categorias.map((c) => c.nombre), valor: s.categoriaId?.nombre, ayuda: 'Ej: Mascotas' },
+  { nombre: 'categoria', etiqueta: 'Categoría (elige una o escribe una nueva)', requerido: true, sugerencias: estado.categorias.map((c) => c.nombre), valor: s.categoria || s.categoriaId?.nombre, ayuda: 'Ej: Mascotas' },
   { nombre: 'etiquetas', etiqueta: 'Etiquetas (separadas por coma)', valor: (s.etiquetas || []).join(', '), ayuda: 'funeral, llorar, velorio' },
   { nombre: 'modalidades', etiqueta: 'Modalidad', tipo: 'multiple', opciones: MODALIDADES, valor: s.modalidades || ['domicilio'], ancho: true },
-  { nombre: 'esInusual', etiqueta: 'Tipo de servicio', tipo: 'casilla', valor: s.esInusual, ayuda: 'Es un servicio poco común', ancho: true },
+  { nombre: 'inusual', etiqueta: 'Tipo de servicio', tipo: 'casilla', valor: s.inusual ?? s.esInusual, ayuda: 'Es un servicio poco común', ancho: true },
 ];
 const datosServicio = (d) => ({ ...d, etiquetas: lista(d.etiquetas) });
 
-const camposPrestador = (p = {}) => [
-  { nombre: 'nombre', etiqueta: 'Nombre', requerido: true, valor: p.nombre },
-  { nombre: 'email', etiqueta: 'Correo', tipo: 'email', requerido: true, valor: p.email },
-  { nombre: 'telefono', etiqueta: 'Teléfono', valor: p.telefono },
-  { nombre: 'ciudad', etiqueta: 'Ciudad', valor: p.ciudad },
-  { nombre: 'zonas', etiqueta: 'Zonas que cubre (separadas por coma)', valor: (p.zonas || []).join(', '), ancho: true, ayuda: 'Chapinero, Usaquén' },
-  { nombre: 'descripcion', etiqueta: 'Presentación', tipo: 'textarea', valor: p.descripcion, ancho: true },
-];
+const camposPrestador = (p = {}) => {
+  const datos = { ...(sesion.usuario || {}), ...p };
+  return [
+    { nombre: 'nombre', etiqueta: 'Nombre', requerido: true, valor: datos.nombre },
+    { nombre: 'email', etiqueta: 'Correo', tipo: 'email', requerido: true, valor: datos.email },
+    { nombre: 'telefono', etiqueta: 'Teléfono', valor: datos.telefono },
+    { nombre: 'ciudad', etiqueta: 'Ciudad', valor: datos.ciudad },
+    { nombre: 'zonas', etiqueta: 'Zonas que cubre (separadas por coma)', valor: (datos.zonas || []).join(', '), ancho: true, ayuda: 'Chapinero, Usaquén' },
+    { nombre: 'descripcion', etiqueta: 'Presentación', tipo: 'textarea', valor: datos.descripcion, ancho: true },
+  ];
+};
 
 const camposUsuario = (u = {}) => [
   { nombre: 'nombre', etiqueta: 'Nombre', requerido: true, valor: u.nombre },
@@ -344,10 +362,10 @@ function tarjetaServicio(s) {
   return `<article class="tarjeta">
     <div class="tarjeta-foto">
       ${s.imagen ? `<img src="${esc(s.imagen)}" alt="" loading="lazy" onerror="this.remove()">` : ''}
-      ${s.esInusual ? '<span class="sello-foto">Poco común</span>' : ''}
+      ${(s.inusual ?? s.esInusual) ? '<span class="sello-foto">Poco común</span>' : ''}
     </div>
     <div class="tarjeta-cuerpo">
-    <div class="sobretitulo"><span>${esc(s.categoriaId?.nombre || 'Sin categoría')}</span></div>
+    <div class="sobretitulo"><span>${esc(s.categoria || s.categoriaId?.nombre || 'Sin categoría')}</span></div>
     <h3>${esc(s.nombre)}</h3>
     <p class="resumen">${esc(s.descripcion)}</p>
     <div class="etiquetas">${s.etiquetas.slice(0, 3).map((e) => `<span>${esc(e)}</span>`).join('')}</div>
@@ -395,12 +413,12 @@ function vistaExplorar() {
 function verServicio(id) {
   const s = estado.servicios.find((x) => x._id === id);
   const ofertas = ofertasDe(id);
-  const propio = sesion.usuario && (sesion.usuario.rol === 'admin' ||
-    (sesion.usuario.rol === 'prestador' && String(s.creadoPor || '') === sesion.usuario.id));
-  const puedeSolicitar = sesion.usuario && ['usuario', 'admin'].includes(sesion.usuario.rol);
+  const propio = sesion.usuario && (esAdmin() ||
+    (esPrestador() && String(s.creadoPor || '') === sesion.usuario.id));
+  const puedeSolicitar = sesion.usuario && (esCliente() || esAdmin());
   abrirModal(`
     <h2>${esc(s.nombre)}</h2>
-    <p class="meta">${esc(s.categoriaId?.nombre || '')} · ${s.modalidades.map((m) => MODALIDADES.find(([v]) => v === m)?.[1]).join(', ')}</p>
+    <p class="meta">${esc(s.categoria || s.categoriaId?.nombre || '')} · ${s.modalidades.map((m) => MODALIDADES.find(([v]) => v === m)?.[1]).join(', ')}</p>
     ${s.imagen ? `<img class="foto-detalle" src="${esc(s.imagen)}" alt="" onerror="this.remove()">` : ''}
     <p>${esc(s.descripcion)}</p>
     <div class="etiquetas">${s.etiquetas.map((e) => `<span>${esc(e)}</span>`).join('')}</div>
@@ -420,7 +438,7 @@ function verServicio(id) {
 }
 
 function solicitarServicio(id) {
-  if (!sesion.usuario || !['usuario', 'admin'].includes(sesion.usuario.rol)) {
+  if (!sesion.usuario || !(esCliente() || esAdmin())) {
     return aviso('Ingresa como cliente para solicitar servicios', true);
   }
   const clienteId = sesion.usuario.id;
@@ -447,11 +465,11 @@ function solicitarServicio(id) {
 const UNIDADES = [['servicio', 'Servicio completo'], ['hora', 'Hora'], ['dia', 'Día']];
 const campoPrestador = () => ({
   nombre: 'prestadorId', etiqueta: 'Prestador', tipo: 'select', requerido: true,
-  opciones: (sesion.usuario?.rol === 'admin'
+  opciones: (esAdmin()
     ? estado.prestadores
     : estado.prestadores.filter((p) => p._id === sesion.usuario?.id)
   ).map((p) => [p._id, p.nombre]),
-  valor: sesion.usuario?.rol === 'prestador' ? sesion.usuario.id : localStorage.getItem('prestadorActual'),
+  valor: esPrestador() ? sesion.usuario.id : localStorage.getItem('prestadorActual'),
 });
 const camposOferta = () => [
   { nombre: 'tarifaBase', etiqueta: 'Precio', tipo: 'number', requerido: true },
@@ -462,7 +480,7 @@ const camposOferta = () => [
 function vistaPublicar() {
   const cabecera = `<div class="encabezado"><div><h1>Publicar servicio</h1>
     <p>Tres pasos: quién lo ofrece, qué es y cuánto cuesta.</p></div></div>`;
-  if (!sesion.usuario || !['admin', 'prestador'].includes(sesion.usuario.rol)) {
+  if (!sesion.usuario || !(esAdmin() || esPrestador())) {
     return `<section class="pagina estrecha">${cabecera}<div class="vacio">Ingresa como prestador o administrador para publicar.<br>
       <button class="boton oscuro" data-accion="abrir-sesion">Iniciar sesión</button></div></section>`;
   }
@@ -501,7 +519,7 @@ async function publicar(form) {
 
 // ---------- Vista: Prestadores ----------
 const puedeEditarPrestador = (p) => Boolean(sesion.usuario && (
-  sesion.usuario.rol === 'admin' || (sesion.usuario.tipo === 'prestador' && sesion.usuario.id === p._id)
+  esAdmin() || (esPrestador() && sesion.usuario.id === p._id)
 ));
 
 function vistaPrestadores() {
@@ -514,7 +532,7 @@ function vistaPrestadores() {
       ${p.descripcion ? `<p class="resumen">${esc(p.descripcion)}</p>` : ''}
       ${p.serviciosOfrecidos.length ? `<table class="lista-simple">${p.serviciosOfrecidos.map((o) => `<tr><td>${esc(nombreDe('servicios', o.servicioId))}</td>
         <td class="derecha"><b>${dinero(o.tarifaBase)}</b> <span class="meta">/ ${esc(o.unidad)}</span></td></tr>`).join('')}</table>` : '<p class="meta">Aún no ofrece servicios.</p>'}
-      ${p.certificaciones.length ? `<div class="etiquetas">${p.certificaciones.map((c) => `<span>${esc(c.titulo)}${c.verificada ? ' ✓' : ''}</span>`).join('')}</div>` : ''}
+      ${p.certificaciones.length ? `<div class="etiquetas">${p.certificaciones.map((c) => `<span>${esc(c.nombre || c.titulo)}${(c.vigente ?? c.verificada) ? ' ✓' : ''}</span>`).join('')}</div>` : ''}
       <div class="tarjeta-pie"><div class="fila-botones">
         ${editable ? `<button class="enlace" data-accion="ofrecer" data-id="${p._id}">+ Servicio</button>
         <button class="enlace" data-accion="certificar" data-id="${p._id}">+ Certificación</button>
@@ -531,9 +549,23 @@ function vistaPrestadores() {
 function editarPrestador(id) {
   const p = id ? porId('prestadores', id) : {};
   const campos = camposPrestador(p);
-  if (id && sesion.usuario?.rol === 'admin') campos.push({ nombre: 'estado', etiqueta: 'Estado', tipo: 'select', valor: p.estado, opciones: [['pendiente', 'Pendiente'], ['verificado', 'Verificado'], ['suspendido', 'Suspendido']] });
-  abrirFormulario(id ? 'Editar prestador' : 'Registrar prestador', campos, 'Guardar', (d) =>
-    ejecutar(() => api('/prestadores' + (id ? '/' + id : ''), id ? 'PUT' : 'POST', { ...d, zonas: lista(d.zonas) }), 'Prestador guardado'));
+  if (esAdmin()) campos.push({ nombre: 'estado', etiqueta: 'Estado', tipo: 'select', valor: p.estado, opciones: [['pendiente', 'Pendiente'], ['verificado', 'Verificado'], ['suspendido', 'Suspendido']] });
+  const titulo = id ? 'Editar prestador' : (sesion.usuario ? 'Aplicar como prestador' : 'Registrar prestador');
+  abrirFormulario(titulo, campos, 'Guardar', async (d) => {
+    try {
+      const respuesta = await api('/prestadores' + (id ? '/' + id : ''), id ? 'PUT' : 'POST', {
+        ...d,
+        zonas: lista(d.zonas),
+      });
+      if (respuesta?.token && respuesta?.usuario) guardarSesion(respuesta);
+      aviso('Prestador guardado');
+      await cargarTodo();
+      return true;
+    } catch (error) {
+      aviso(error.message, true);
+      return false;
+    }
+  });
 }
 
 function ofrecerServicio(id) {
@@ -552,8 +584,8 @@ function ofrecerServicio(id) {
 
 function certificar(id) {
   abrirFormulario('Agregar certificación', [
-    { nombre: 'titulo', etiqueta: 'Título', requerido: true, ancho: true },
-    { nombre: 'entidad', etiqueta: 'Entidad' },
+    { nombre: 'nombre', etiqueta: 'Nombre', requerido: true, ancho: true },
+    { nombre: 'institucion', etiqueta: 'Institución' },
     { nombre: 'fechaVencimiento', etiqueta: 'Vence', tipo: 'date' },
   ], 'Agregar', (d) =>
     ejecutar(() => api(`/prestadores/${id}/certificaciones`, 'POST', { ...d, fechaVencimiento: d.fechaVencimiento || undefined }), 'Certificación agregada'));
@@ -563,19 +595,23 @@ function certificar(id) {
 function puedeCambiarEstadoUI(o, estado) {
   const u = sesion.usuario;
   if (!u) return false;
-  if (u.rol === 'admin') return true;
-  if (u.tipo === 'prestador') {
-    return (o.estado === 'solicitada' && estado === 'cotizada') ||
-      (String(o.prestadorId || '') === u.id && ['agendada', 'en_ejecucion', 'finalizada'].includes(estado));
+  if (esAdmin()) return true;
+  const permisos = [];
+  if (esPrestador()) {
+    permisos.push((o.estado === 'solicitada' && estado === 'cotizada') ||
+      (String(o.prestador || o.prestadorId || '') === u.id && ['agendada', 'en_ejecucion', 'finalizada'].includes(estado)));
   }
-  return u.tipo === 'usuario' && String(o.clienteId) === u.id &&
-    ['agendada', 'asignada', 'pagada', 'calificada', 'cancelada', 'en_reclamo'].includes(estado);
+  if (esCliente()) {
+    permisos.push(String(o.cliente || o.clienteId) === u.id &&
+      ['agendada', 'asignada', 'aceptada', 'pagada', 'calificada', 'cancelada', 'en_reclamo'].includes(estado));
+  }
+  return permisos.some(Boolean);
 }
 
 function vistaOrdenes() {
-  const clienteId = sesion.usuario?.tipo === 'usuario' ? sesion.usuario.id : $('#clienteActual').value;
+  const clienteId = esCliente() ? sesion.usuario.id : $('#clienteActual').value;
   const soloMias = localStorage.getItem('soloMias') === '1';
-  const ordenes = estado.ordenes.filter((o) => !soloMias || o.clienteId === clienteId);
+  const ordenes = estado.ordenes.filter((o) => !soloMias || String(o.cliente || o.clienteId) === clienteId);
   const filas = ordenes.map((o) => {
     const datos = [o.zona, o.direccion, o.fechaProgramada && fecha(o.fechaProgramada), o.precioAcordado != null && dinero(o.precioAcordado)].filter(Boolean);
     const permitidas = TRANSICIONES[o.estado].filter((e) => puedeCambiarEstadoUI(o, e));
@@ -584,11 +620,14 @@ function vistaOrdenes() {
       <div class="panel-cabecera">
         <div>
           <h2>${esc(nombreDe('servicios', o.servicioId))}</h2>
-          <div class="meta">${esc(nombreDe('usuarios', o.clienteId))} → ${o.prestadorId ? esc(nombreDe('prestadores', o.prestadorId)) : 'sin prestador asignado'}</div>
+          <div class="meta">${esc(nombreDe('usuarios', o.cliente || o.clienteId))} → ${(o.prestador || o.prestadorId) ? esc(nombreDe('prestadores', o.prestador || o.prestadorId)) : 'sin prestador asignado'}</div>
         </div>
         ${chipEstado(o.estado)}
       </div>
       <p>${esc(o.descripcion)}</p>
+      ${o.snapshot ? `<p class="meta">Snapshot: ${esc(o.snapshot.nombreCliente || '')} · ${esc(o.snapshot.nombreServicio || '')} · ${esc(o.snapshot.categoria || '')}${o.snapshot.tarifa != null ? ' · ' + dinero(o.snapshot.tarifa) : ''}</p>` : ''}
+      ${o.cancelacion ? `<p class="meta">Cancelación: ${esc(o.cancelacion.quien)} · ${esc(o.cancelacion.razon || '')}${o.cancelacion.penalizacion ? ' · penalización ' + dinero(o.cancelacion.penalizacion) : ''}</p>` : ''}
+      ${o.calificacion ? `<p class="meta">Calificación: ${esc(o.calificacion.puntaje)}/5 ${esc(o.calificacion.comentario || '')}</p>` : ''}
       ${datos.length ? `<p class="meta">${datos.map(esc).join(' · ')}</p>` : ''}
       <ul class="historial">${o.historialEstados.map((h) => `<li><b>${esc(textoEstado(h.estado))}</b> · ${fecha(h.fecha)} · ${esc(h.actor.tipo)}${h.nota ? ' · ' + esc(h.nota) : ''}</li>`).join('')}</ul>
       ${SIGUIENTE[o.estado] ? `<p class="pista"><b>Siguiente paso:</b> ${SIGUIENTE[o.estado]}</p>` : ''}
@@ -610,10 +649,10 @@ function cambiarEstado(id, nuevo) {
   const o = porId('ordenes', id);
   const campos = [];
   if (nuevo === 'cotizada') campos.push({ nombre: 'precioAcordado', etiqueta: 'Precio cotizado', tipo: 'number', requerido: true });
-  if (nuevo === 'asignada') {
+  if (nuevo === 'asignada' || nuevo === 'aceptada') {
     const candidatos = ofertasDe(o.servicioId).map((x) => x.prestador);
     const opciones = (candidatos.length ? candidatos : estado.prestadores).map((p) => [p._id, p.nombre]);
-    campos.push({ nombre: 'prestadorId', etiqueta: 'Prestador asignado', tipo: 'select', requerido: true, opciones });
+    campos.push({ nombre: 'prestador', etiqueta: 'Prestador asignado', tipo: 'select', requerido: true, opciones });
   }
   if (nuevo === 'agendada') campos.push({ nombre: 'fechaProgramada', etiqueta: 'Fecha acordada', tipo: 'datetime-local', valor: o.fechaProgramada ? o.fechaProgramada.slice(0, 16) : '' });
   campos.push({ nombre: 'nota', etiqueta: 'Nota (opcional)', ancho: true });
@@ -627,7 +666,7 @@ function cambiarEstado(id, nuevo) {
 
 // ---------- Vista: Gestion ----------
 function vistaGestion() {
-  if (sesion.usuario?.rol !== 'admin') {
+  if (!esAdmin()) {
     return '<section class="pagina"><div class="vacio">Esta sección es solo para administradores.</div></section>';
   }
   const tabla = (titulo, tipo, columnas, filas) => `

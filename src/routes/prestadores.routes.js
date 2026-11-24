@@ -1,10 +1,10 @@
 const { Router } = require('express');
 const ctrl = require('../controllers/prestadores.controller');
-const { autenticar } = require('../middlewares/autenticacion');
+const { autenticar, autenticarOpcional } = require('../middlewares/autenticacion');
 
 const router = Router();
 
-router.post('/', ctrl.crear);
+router.post('/', autenticarOpcional, ctrl.crear);
 router.get('/', ctrl.listar);
 router.get('/:id', ctrl.obtener);
 router.put('/:id', autenticar, ctrl.actualizar);

@@ -2,21 +2,21 @@ const Servicio = require('../models/Servicio');
 const Categoria = require('../models/Categoria');
 const { ErrorHttp } = require('../middlewares/errores');
 
-async function validarCategoria(categoriaId) {
-  if (categoriaId === undefined) return;
-  const existe = await Categoria.exists({ _id: categoriaId });
-  if (!existe) throw new ErrorHttp(400, 'La categoria indicada no existe');
-}
-
-async function resolverCategoria(body) {
-  if (typeof body.categoria === 'string' && body.categoria.trim()) {
-    const nombre = body.categoria.trim();
+async function resolverCategoria(datos) {
+  const nombre = typeof datos.categoria === 'string' ? datos.categoria.trim() : '';
+  if (nombre) {
     let categoria = await Categoria.findOne({ nombre }).collation({ locale: 'es', strength: 1 });
     if (!categoria) categoria = await Categoria.create({ nombre });
-    body.categoriaId = categoria._id;
+    datos.categoria = categoria.nombre;
+    datos.categoriaId = categoria._id;
+    return;
   }
-  delete body.categoria;
-  await validarCategoria(body.categoriaId);
+
+  if (datos.categoriaId) {
+    const categoria = await Categoria.findById(datos.categoriaId);
+    if (!categoria) throw new ErrorHttp(400, 'La categoria indicada no existe');
+    datos.categoria = categoria.nombre;
+  }
 }
 
 async function verificarPropietario(req, id) {
@@ -37,11 +37,16 @@ async function crear(req, res) {
 }
 
 async function listar(req, res) {
-  const { q, categoriaId, inusual, modalidad } = req.query;
-  const filtro = { activo: true };
+  const { q, categoria, categoriaId, inusual, esInusual, modalidad, estado, activa } = req.query;
+  const filtro = {};
+  if (estado) filtro.estado = String(estado);
+  else if (activa !== undefined) filtro.activa = activa === 'true';
+  else filtro.activo = true;
   if (q) filtro.$text = { $search: q };
+  if (categoria) filtro.categoria = String(categoria);
   if (categoriaId) filtro.categoriaId = categoriaId;
-  if (inusual !== undefined) filtro.esInusual = inusual === 'true';
+  if (inusual !== undefined) filtro.inusual = inusual === 'true';
+  else if (esInusual !== undefined) filtro.esInusual = esInusual === 'true';
   if (modalidad) filtro.modalidades = modalidad;
 
   const servicios = await Servicio.find(filtro)
