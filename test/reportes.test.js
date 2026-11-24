@@ -8,7 +8,6 @@ process.env.JWT_SECRET = 'secreto-de-pruebas';
 
 const app = require('../src/app');
 const Usuario = require('../src/models/Usuario');
-const Prestador = require('../src/models/Prestador');
 const Orden = require('../src/models/Orden');
 const { hashearPassword } = require('../src/utils/password');
 
@@ -27,12 +26,12 @@ after(async () => {
 });
 
 beforeEach(async () => {
-  await Promise.all([Usuario.deleteMany({}), Prestador.deleteMany({}), Orden.deleteMany({})]);
+  await Promise.all([Usuario.deleteMany({}), Orden.deleteMany({})]);
 
   const admin = await Usuario.create({
     nombre: 'Admin',
     email: 'admin@example.com',
-    rol: 'admin',
+    roles: ['administrador'],
     passwordHash: await hashearPassword('clave12345'),
   });
   const cliente = await Usuario.create({
@@ -41,50 +40,54 @@ beforeEach(async () => {
     passwordHash: await hashearPassword('clave12345'),
   });
 
-  const [joao, marta] = await Prestador.create([
+  const [joao, marta] = await Usuario.create([
     {
       nombre: 'Joao',
       email: 'joao@example.com',
-      zonas: ['Chapinero'],
-      calificacionPromedio: 4.8,
-      totalCalificaciones: 5,
+      roles: ['prestador'],
+      perfilPrestador: {
+        zonasCobertura: ['Chapinero'],
+        calificacion: { promedio: 4.8, total: 5 },
+      },
     },
     {
       nombre: 'Marta',
       email: 'marta@example.com',
-      zonas: ['Usaquén'],
-      calificacionPromedio: 4.5,
-      totalCalificaciones: 2,
+      roles: ['prestador'],
+      perfilPrestador: {
+        zonasCobertura: ['Usaquén'],
+        calificacion: { promedio: 4.5, total: 2 },
+      },
     },
   ]);
 
   const servicioId = new mongoose.Types.ObjectId();
   await Orden.create([
     {
-      clienteId: cliente._id,
-      servicioId,
-      prestadorId: joao._id,
+      cliente: cliente._id,
+      servicio: servicioId,
+      prestador: joao._id,
       descripcion: 'Orden 1',
       estado: 'calificada',
     },
     {
-      clienteId: cliente._id,
-      servicioId,
-      prestadorId: joao._id,
+      cliente: cliente._id,
+      servicio: servicioId,
+      prestador: joao._id,
       descripcion: 'Orden 2',
       estado: 'pagada',
     },
     {
-      clienteId: cliente._id,
-      servicioId,
-      prestadorId: joao._id,
+      cliente: cliente._id,
+      servicio: servicioId,
+      prestador: joao._id,
       descripcion: 'Orden 3',
       estado: 'solicitada',
     },
     {
-      clienteId: cliente._id,
-      servicioId,
-      prestadorId: marta._id,
+      cliente: cliente._id,
+      servicio: servicioId,
+      prestador: marta._id,
       descripcion: 'Orden 4',
       estado: 'finalizada',
     },
@@ -123,6 +126,7 @@ test('RP-02 ordena por calificacion y cuenta ordenes completadas', async () => {
   const [primero, segundo] = res.body.ranking;
   assert.equal(primero.nombre, 'Joao');
   assert.equal(primero.ordenesCompletadas, 2);
+  assert.equal(primero.calificacionPromedio, 4.8);
   assert.equal(primero.posicion, 1);
   assert.equal(segundo.nombre, 'Marta');
   assert.equal(segundo.ordenesCompletadas, 1);

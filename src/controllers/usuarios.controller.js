@@ -1,7 +1,8 @@
 const Usuario = require('../models/Usuario');
 const { ErrorHttp } = require('../middlewares/errores');
 const { hashearPassword } = require('../utils/password');
-const { esPropioOAdmin } = require('../middlewares/autenticacion');
+const { esPropioOAdmin, tieneRol } = require('../middlewares/autenticacion');
+const { normalizarRoles } = require('../utils/modelos');
 
 async function prepararDatos(body, esAdmin) {
   const datos = { ...body };
@@ -11,7 +12,12 @@ async function prepararDatos(body, esAdmin) {
   } else {
     delete datos.passwordHash;
   }
-  if (!esAdmin) delete datos.rol;
+
+  if (datos.roles !== undefined || datos.rol !== undefined) {
+    datos.roles = normalizarRoles(datos.roles, datos.rol);
+    delete datos.rol;
+  }
+  if (!esAdmin) delete datos.roles;
   return datos;
 }
 
@@ -24,6 +30,12 @@ async function crear(req, res) {
 async function listar(req, res) {
   const filtro = {};
   if (req.query.ciudad) filtro.ciudad = req.query.ciudad;
+  if (req.query.zona) filtro.zona = req.query.zona;
+  if (req.query.roles) filtro.roles = normalizarRoles(String(req.query.roles).split(','));
+  else if (req.query.rol) filtro.roles = normalizarRoles([], req.query.rol);
+  if (req.query.estado) filtro.estado = String(req.query.estado);
+  else if (req.query.activa !== undefined) filtro.activa = req.query.activa === 'true';
+
   const usuarios = await Usuario.find(filtro).sort({ nombre: 1 });
   res.json(usuarios);
 }
@@ -38,7 +50,8 @@ async function actualizar(req, res) {
   if (!esPropioOAdmin(req, req.params.id)) {
     throw new ErrorHttp(403, 'Solo puedes editar tu propio perfil');
   }
-  const datos = await prepararDatos(req.body, req.auth.rol === 'admin');
+  const esAdmin = tieneRol(req, 'admin');
+  const datos = await prepararDatos(req.body, esAdmin);
   const usuario = await Usuario.findByIdAndUpdate(req.params.id, datos, {
     returnDocument: 'after',
     runValidators: true,
